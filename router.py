@@ -82,7 +82,8 @@ class Router:
                 self.routing_table[neighbor_ip] = (weight, neighbor_ip)
             
             # Send immediate update to new neighbor
-            self._send_update_message(neighbor_ip)
+            # self._send_update_message(neighbor_ip)
+            # let periodic updates handle this instead
     
     def remove_link(self, neighbor_ip: str):
         """Remove a virtual link to a neighbor"""
