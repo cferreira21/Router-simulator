@@ -334,6 +334,7 @@ class Router:
                 print("Usage: trace <ip>")
                 return
             
+            
             try:
                 destination_ip = command[1]
                 ipaddress.IPv4Address(destination_ip)
