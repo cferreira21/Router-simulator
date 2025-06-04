@@ -54,11 +54,11 @@ class Router:
         
         # Process startup file if provided
         if startup_file:
-            self._process_startup_file(startup_file)
+            self._process_input_file(startup_file)
         
         print(f"Router {router_ip} started successfully (period={period}s)")
     
-    def _process_startup_file(self, filename: str):
+    def _process_input_file(self, filename: str):
         """Process startup commands from file"""
         try:
             with open(filename, 'r') as f:
@@ -108,14 +108,8 @@ class Router:
     
     def send_trace(self, destination_ip: str):
         """Send a trace message to destination"""
-        trace_message = {
-            'type': 'trace',
-            'source': self.router_ip,
-            'destination': destination_ip,
-            'routers': [self.router_ip]
-        }
-        
-        self._forward_message(trace_message)
+        trace_message = self._create_trace_message(destination_ip)
+        self.forward_message(trace_message)
     
     def _listen_for_messages(self):
         """Listen for incoming messages"""
@@ -189,7 +183,7 @@ class Router:
             print(payload)
         else:
             # Forward the message
-            self._forward_message(message)
+            self.forward_message(message)
     
     def _process_trace_message(self, message: dict):
         """Process trace messages"""
@@ -203,18 +197,13 @@ class Router:
         if destination == self.router_ip:
             # We are the destination - send response back to source
             source = message.get('source')
-            response = {
-                'type': 'data',
-                'source': self.router_ip,
-                'destination': source,
-                'payload': json.dumps(message)
-            }
-            self._forward_message(response)
+            response = self._create_data_message(source, json.dumps(message))
+            self.forward_message(response)
         else:
             # Forward the trace message
-            self._forward_message(message)
+            self.forward_message(message)
     
-    def _forward_message(self, message: dict):
+    def forward_message(self, message: dict):
         """Forward a message towards its destination"""
         destination = message.get('destination')
         
@@ -231,7 +220,8 @@ class Router:
                 print(f"No route to {destination}, cannot forward message")
                 pass
     
-    def _send_update_message(self, neighbor_ip: str):
+
+    def send_update_message(self, neighbor_ip: str):
         """Send update message to a specific neighbor"""
         distances = {}
         
@@ -241,15 +231,8 @@ class Router:
                 if next_hop != neighbor_ip:  # Split horizon
                     distances[dest_ip] = distance
         
-        message = {
-            'type': 'update',
-            'source': self.router_ip,
-            'destination': neighbor_ip,
-            'distances': distances
-        }
+        message = self._create_update_message(neighbor_ip, distances)
         
-        #print(f"[DEBUG] Sending update to {neighbor_ip}: {distances}")
-    
         try:
             self.socket.sendto(json.dumps(message).encode(), (neighbor_ip, self.port))
         except Exception as e:
@@ -261,7 +244,7 @@ class Router:
             neighbors = list(self.neighbors.keys())
         
         for neighbor_ip in neighbors:
-            self._send_update_message(neighbor_ip)
+            self.send_update_message(neighbor_ip)
     
     def _periodic_updates(self):
         """Periodically send updates to neighbors"""
@@ -387,6 +370,33 @@ class Router:
         self.socket.close()
         print(f"Router {self.router_ip} shutdown")
 
+    def _create_trace_message(self, destination_ip: str) -> dict:
+        """Create a trace message"""
+        return {
+            'type': 'trace',
+            'source': self.router_ip,
+            'destination': destination_ip,
+            'routers': [self.router_ip]
+        }
+
+    def _create_data_message(self, destination: str, payload: str) -> dict:
+        """Create a data message"""
+        return {
+            'type': 'data',
+            'source': self.router_ip,
+            'destination': destination,
+            'payload': payload
+        }
+
+    def _create_update_message(self, neighbor_ip: str, distances: dict) -> dict:
+        """Create an update message"""
+        return {
+            'type': 'update',
+            'source': self.router_ip,
+            'destination': neighbor_ip,
+            'distances': distances
+        }
+    
 def main():
     if len(sys.argv) < 3 or len(sys.argv) > 4:
         print("Usage: ./router.py <address> <period> [startup]")
