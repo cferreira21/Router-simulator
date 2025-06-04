@@ -227,7 +227,8 @@ class Router:
                 except Exception as e:
                     print(f"Error forwarding message to {next_hop}: {e}")
             else:
-                # No route to destination - drop the message
+                # No route to destination
+                print(f"No route to {destination}, cannot forward message")
                 pass
     
     def _send_update_message(self, neighbor_ip: str):
@@ -247,6 +248,8 @@ class Router:
             'distances': distances
         }
         
+        #print(f"[DEBUG] Sending update to {neighbor_ip}: {distances}")
+    
         try:
             self.socket.sendto(json.dumps(message).encode(), (neighbor_ip, self.port))
         except Exception as e:
@@ -265,7 +268,10 @@ class Router:
         while self.running:
             time.sleep(self.period)
             if self.neighbors:  # Only send if we have neighbors
+                #print(f"[DEBUG] Sending periodic updates to {len(self.neighbors)} neighbors")
                 self._send_updates_to_neighbors()
+           # else:
+                #print("[DEBUG] No neighbors to send updates to")
     
     def _check_neighbor_timeouts(self):
         """Check for neighbor timeouts and remove stale routes"""
@@ -329,6 +335,7 @@ class Router:
             neighbor_ip = command[1]
             self.remove_link(neighbor_ip)
         
+        
         elif command[0] == 'trace':
             if len(command) != 2:
                 print("Usage: trace <ip>")
@@ -342,6 +349,13 @@ class Router:
             except ValueError:
                 print("Invalid IP address")
         
+        elif command[0] == 'show':
+            print("show routing table")
+            self.show_routing_table()
+    
+        elif command[0] == 'neighbors':
+            print("show neighbors")
+            self.show_neighbors()
         else:
             print("Unknown command. Available: add, del, trace")
     
