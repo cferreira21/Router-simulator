@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
-"""
-UDPRIP - Virtual Topology Router Implementation
-Implements a distance vector routing protocol over UDP sockets
-"""
 
 import socket
 import threading
 import time
 import json
 import sys
-import argparse
-from typing import Dict, Set, Optional, Tuple
+from typing import Dict, Optional, Tuple
 import ipaddress
-import os
+
 
 class Router:
     def __init__(self, router_ip: str, period: float, startup_file: Optional[str] = None):
         self.router_ip = router_ip
         self.period = period
-        self.port = 55151  # Fixed port as per specification
+        self.port = 55151
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         
         # Bind to the router's IP address
@@ -27,7 +22,6 @@ class Router:
             print(f"Router bound to {router_ip}:{self.port}")
         except OSError as e:
             print(f"Error binding to {router_ip}:{self.port}: {e}")
-            print("Make sure the IP address exists on your system")
             sys.exit(1)
         
         # Routing data structures
@@ -42,7 +36,6 @@ class Router:
         self.running = True
         self.lock = threading.Lock()
         
-        # Start background threads
         self.listen_thread = threading.Thread(target=self._listen_for_messages, daemon=True)
         self.listen_thread.start()
         
@@ -51,8 +44,7 @@ class Router:
         
         self.timeout_thread = threading.Thread(target=self._check_neighbor_timeouts, daemon=True)
         self.timeout_thread.start()
-        
-        # Process startup file if provided
+
         if startup_file:
             self._process_input_file(startup_file)
         
@@ -72,7 +64,6 @@ class Router:
             print(f"Error processing startup file: {e}")
     
     def add_link(self, neighbor_ip: str, weight: int):
-        """Add a virtual link to a neighbor"""
         with self.lock:
             self.neighbors[neighbor_ip] = weight
             print(f"Added link to {neighbor_ip} with weight {weight}")
@@ -80,13 +71,8 @@ class Router:
             # Update routing table if this provides a better route
             if neighbor_ip not in self.routing_table or self.routing_table[neighbor_ip][0] > weight:
                 self.routing_table[neighbor_ip] = (weight, neighbor_ip)
-            
-            # Send immediate update to new neighbor
-            # self._send_update_message(neighbor_ip)
-            # let periodic updates handle this instead
     
     def remove_link(self, neighbor_ip: str):
-        """Remove a virtual link to a neighbor"""
         with self.lock:
             if neighbor_ip in self.neighbors:
                 del self.neighbors[neighbor_ip]
@@ -107,12 +93,10 @@ class Router:
                 print(f"No link to {neighbor_ip} exists")
     
     def send_trace(self, destination_ip: str):
-        """Send a trace message to destination"""
         trace_message = self._create_trace_message(destination_ip)
         self.forward_message(trace_message)
     
     def _listen_for_messages(self):
-        """Listen for incoming messages"""
         while self.running:
             try:
                 data, addr = self.socket.recvfrom(4096)
@@ -125,7 +109,6 @@ class Router:
                     print(f"Error receiving message: {e}")
     
     def _process_message(self, message: dict):
-        """Process incoming messages based on type"""
         msg_type = message.get('type')
         
         if msg_type == 'update':
@@ -135,8 +118,25 @@ class Router:
         elif msg_type == 'trace':
             self._process_trace_message(message)
     
+    def _should_update_route(self, dest_ip: str, new_distance: int, source_ip: str) -> bool:
+        """Determine if a route should be updated"""
+        if dest_ip not in self.routing_table:
+            # No existing route - accept the new route
+            return True
+        
+        current_distance, current_next_hop = self.routing_table[dest_ip]
+        
+        if current_distance > new_distance:
+            # Better route found
+            return True
+        
+        if current_next_hop == source_ip:
+            # Always accept update from same neighbor to handle route changes/failures
+            return True
+        
+        return False
+    
     def _process_update_message(self, message: dict):
-        """Process incoming route update messages"""
         source_ip = message.get('source')
         distances = message.get('distances', {})
         
@@ -158,23 +158,18 @@ class Router:
                 
                 new_distance = distance + sender_weight
                 
-                # Update routing table if we found a better route
-                if (dest_ip not in self.routing_table or 
-                    self.routing_table[dest_ip][0] > new_distance or
-                    self.routing_table[dest_ip][1] == source_ip):  # Update if route came from same neighbor
-                    
+                # Update routing table if we should accept this route
+                if self._should_update_route(dest_ip, new_distance, source_ip):
                     old_distance = self.routing_table.get(dest_ip, (float('inf'), None))[0]
                     self.routing_table[dest_ip] = (new_distance, source_ip)
                     
                     if old_distance != new_distance:
                         changed = True
-        
-        # If routes changed, send updates to neighbors
+    
         if changed:
             self._send_updates_to_neighbors()
     
     def _process_data_message(self, message: dict):
-        """Process data messages"""
         destination = message.get('destination')
         
         if destination == self.router_ip:
@@ -186,7 +181,6 @@ class Router:
             self.forward_message(message)
     
     def _process_trace_message(self, message: dict):
-        """Process trace messages"""
         destination = message.get('destination')
         routers = message.get('routers', [])
         
@@ -204,7 +198,6 @@ class Router:
             self.forward_message(message)
     
     def forward_message(self, message: dict):
-        """Forward a message towards its destination"""
         destination = message.get('destination')
         
         with self.lock:
@@ -217,18 +210,17 @@ class Router:
                     print(f"Error forwarding message to {next_hop}: {e}")
             else:
                 # No route to destination
-                print(f"No route to {destination}, cannot forward message")
+                print(f"No route to {destination}, cannot forward message from {message.get('source')}")
                 pass
     
 
     def send_update_message(self, neighbor_ip: str):
-        """Send update message to a specific neighbor"""
         distances = {}
         
         with self.lock:
-            # Implement split horizon - don't send routes learned from this neighbor
+            # Split horizon
             for dest_ip, (distance, next_hop) in self.routing_table.items():
-                if next_hop != neighbor_ip:  # Split horizon
+                if next_hop != neighbor_ip: 
                     distances[dest_ip] = distance
         
         message = self._create_update_message(neighbor_ip, distances)
@@ -239,7 +231,6 @@ class Router:
             print(f"Error sending update to {neighbor_ip}: {e}")
     
     def _send_updates_to_neighbors(self):
-        """Send update messages to all neighbors"""
         with self.lock:
             neighbors = list(self.neighbors.keys())
         
@@ -250,21 +241,20 @@ class Router:
         """Periodically send updates to neighbors"""
         while self.running:
             time.sleep(self.period)
-            if self.neighbors:  # Only send if we have neighbors
+            if self.neighbors:
                 #print(f"[DEBUG] Sending periodic updates to {len(self.neighbors)} neighbors")
                 self._send_updates_to_neighbors()
            # else:
                 #print("[DEBUG] No neighbors to send updates to")
     
     def _check_neighbor_timeouts(self):
-        """Check for neighbor timeouts and remove stale routes"""
         while self.running:
-            time.sleep(self.period)  # Check every period
+            time.sleep(self.period)
             current_time = time.time()
             timeout_threshold = 4 * self.period
             
             with self.lock:
-                # Find neighbors that haven't sent updates recently
+                # Find neighbors that timed out
                 timed_out_neighbors = []
                 for neighbor_ip, last_update in self.last_update_received.items():
                     if current_time - last_update > timeout_threshold:
@@ -332,46 +322,10 @@ class Router:
             except ValueError:
                 print("Invalid IP address")
         
-        elif command[0] == 'show':
-            print("show routing table")
-            self.show_routing_table()
-    
-        elif command[0] == 'neighbors':
-            print("show neighbors")
-            self.show_neighbors()
         else:
-            print("Unknown command. Available: add, del, trace")
-    
-    def show_routing_table(self):
-        """Display the current routing table"""
-        print(f"\nRouting table for {self.router_ip}:")
-        print("Destination\t\tDistance\tNext Hop")
-        print("-" * 50)
-        
-        with self.lock:
-            for dest_ip, (distance, next_hop) in sorted(self.routing_table.items()):
-                print(f"{dest_ip:<15}\t{distance}\t\t{next_hop}")
-        print()
-    
-    def show_neighbors(self):
-        """Display current neighbors"""
-        print(f"\nNeighbors of {self.router_ip}:")
-        print("IP Address\t\tWeight")
-        print("-" * 30)
-        
-        with self.lock:
-            for neighbor_ip, weight in sorted(self.neighbors.items()):
-                print(f"{neighbor_ip:<15}\t{weight}")
-        print()
-    
-    def shutdown(self):
-        """Shutdown the router"""
-        self.running = False
-        self.socket.close()
-        print(f"Router {self.router_ip} shutdown")
+            print("Usage: add <ip> <weight>, del <ip>, trace <ip>")
 
     def _create_trace_message(self, destination_ip: str) -> dict:
-        """Create a trace message"""
         return {
             'type': 'trace',
             'source': self.router_ip,
@@ -380,7 +334,6 @@ class Router:
         }
 
     def _create_data_message(self, destination: str, payload: str) -> dict:
-        """Create a data message"""
         return {
             'type': 'data',
             'source': self.router_ip,
@@ -389,7 +342,6 @@ class Router:
         }
 
     def _create_update_message(self, neighbor_ip: str, distances: dict) -> dict:
-        """Create an update message"""
         return {
             'type': 'update',
             'source': self.router_ip,
@@ -399,7 +351,7 @@ class Router:
     
 def main():
     if len(sys.argv) < 3 or len(sys.argv) > 4:
-        print("Usage: ./router.py <address> <period> [startup]")
+        print("Usage: ./router.py <address> <period> [startup file]")
         sys.exit(1)
     
     router_ip = sys.argv[1]
@@ -421,7 +373,6 @@ def main():
         print("Error: Invalid IP address format")
         sys.exit(1)
     
-    # Create router instance
     router = Router(router_ip, period, startup_file)
     
     try:
@@ -441,7 +392,9 @@ def main():
                 break
     
     finally:
-        router.shutdown()
+        router.running = False
+        router.socket.close()
+        print(f"Router {router.router_ip} shutdown")
 
 if __name__ == "__main__":
     main()
